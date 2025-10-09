@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Toggle Raspberry Pi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    .card { max-width: 420px; border: 1px solid #ddd; border-radius: 12px; padding: 1.5rem; }
+    .state { font-size: 1.1rem; margin-bottom: 1rem; }
+    button { font-size: 1rem; padding: .6rem 1rem; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+    .on { color: #0a0; font-weight: 600; }
+    .off { color: #a00; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Interruptor</h1>
+    <p class="state">Estado: <span id="stateLabel">…</span></p>
+    <button id="toggleBtn">Cambiar estado</button>
+  </div>
+
+  <script>
+    const label = document.getElementById('stateLabel');
+    const btn = document.getElementById('toggleBtn');
+
+    function renderState(s) {
+      label.textContent = s ? 'ON' : 'OFF';
+      label.className = s ? 'on' : 'off';
+    }
+
+    async function fetchState() {
+      try {
+        const r = await fetch('/state');
+        const data = await r.json();
+        renderState(!!data.state);
+      } catch (e) {
+        label.textContent = 'Error al leer estado';
+      }
+    }
+
+    async function toggle() {
+      btn.disabled = true;
+      try {
+        const r = await fetch('/toggle', { method: 'POST' });
+        const data = await r.json();
+        renderState(!!data.state);
+      } catch (e) {
+        alert('No se pudo cambiar el estado');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    btn.addEventListener('click', toggle);
+    fetchState();
+  </script>
+</body>
+</html>

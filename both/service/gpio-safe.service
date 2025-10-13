@@ -1,0 +1,13 @@
+[Unit]
+Description=Force GPIO safe state (all LOW) on shutdown
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target poweroff.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/both/scripts/gpio_all_low.py
+
+[Install]
+WantedBy=multi-user.target

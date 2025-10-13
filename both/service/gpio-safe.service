@@ -1,13 +1,22 @@
+# /etc/systemd/system/gpio-safe.service
 [Unit]
 Description=Force GPIO safe state (all LOW) on shutdown
 DefaultDependencies=no
+# Queremos que se detenga justo al final del shutdown…
 Before=shutdown.target reboot.target halt.target poweroff.target
+# …y DESPUÉS de que se hayan parado nuestros otros servicios (parada inversa)
+Before=boot-led.service internet-led.service server-led.service buttons-power.service gpio-server-switch.service toggle.service
+# Garantiza que forme parte de la transacción de apagado
+Conflicts=shutdown.target reboot.target halt.target poweroff.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/true
 ExecStop=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/both/scripts/gpio_all_low.py
+# Evita que systemd mate al proceso si tarda un poco
+KillMode=process
+TimeoutStopSec=10s
 
 [Install]
 WantedBy=multi-user.target

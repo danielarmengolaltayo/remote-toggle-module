@@ -1,0 +1,14 @@
+[Unit]
+Description=Internet connectivity LED (client)
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/both/scripts/internet_led.py
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

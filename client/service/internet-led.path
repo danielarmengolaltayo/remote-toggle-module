@@ -1,0 +1,8 @@
+[Unit]
+Description=Start internet-led when /run/boot-ready exists (client)
+
+[Path]
+PathExists=/run/boot-ready
+
+[Install]
+WantedBy=multi-user.target

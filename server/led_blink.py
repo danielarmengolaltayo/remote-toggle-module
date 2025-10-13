@@ -1,3 +1,4 @@
+# script test GPIO raspberry pi
 import RPi.GPIO as GPIO
 import time
 

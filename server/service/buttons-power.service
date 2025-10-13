@@ -6,7 +6,7 @@ After=multi-user.target
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /home/danielarmengolaltayo/Desktop/remote-toggle-module/server/scripts/buttons_power.py
+ExecStart=/usr/bin/python3 /home/danielarmengolaltayo/Desktop/remote-toggle-module/both/scripts/buttons_power.py
 Restart=always
 RestartSec=1
 

@@ -15,12 +15,13 @@ DRY_RUN = False
 def do_reboot():
     print("[ACTION] REBOOT NOW")
     if not DRY_RUN:
-        subprocess.Popen(["/sbin/reboot"])
+        # ignora inhibidores, más fiable en algunos entornos
+        subprocess.Popen(["/bin/systemctl", "reboot", "-i"])
 
 def do_shutdown():
     print("[ACTION] SHUTDOWN NOW")
     if not DRY_RUN:
-        subprocess.Popen(["/sbin/poweroff", "-h", "now"])
+        subprocess.Popen(["/bin/systemctl", "poweroff", "-i"])
 
 def pressed(pin): return GPIO.input(pin) == ACTIVE_LEVEL
 

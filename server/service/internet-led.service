@@ -5,7 +5,7 @@ Description=Internet connectivity LED indicator (GPIO)
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /home/danielarmengolaltayo/Desktop/remote-toggle-module/server/scripts/internet_led.py
+ExecStart=/usr/bin/python3 /home/danielarmengolaltayo/Desktop/remote-toggle-module/both/scripts/internet_led.py
 Restart=always
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1

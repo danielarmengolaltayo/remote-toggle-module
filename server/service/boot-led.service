@@ -8,7 +8,7 @@ Before=multi-user.target
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /home/danielarmengolaltayo/Desktop/remote-toggle-module/server/scripts/boot_led.py
+ExecStart=/usr/bin/python3 /home/danielarmengolaltayo/Desktop/remote-toggle-module/both/scripts/boot_led.py
 Restart=no
 
 [Install]

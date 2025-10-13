@@ -5,7 +5,7 @@ import RPi.GPIO as GPIO
 # --- Configuración ---
 # Pines (modo BOARD)
 BTN_REBOOT   = 11  # a GND (pull-up interno)
-BTN_SHUTDOWN = 12  # a GND (pull-up interno)
+BTN_SHUTDOWN = 15  # a GND (pull-up interno)
 
 ACTIVE_LEVEL = GPIO.LOW   # pulsador a GND
 DEBOUNCE_SEC = 0.05       # 50 ms

@@ -26,7 +26,7 @@ POST_HOOK="${POST_HOOK:-}"
 # Ejemplo: SERVICES="toggle.service server-led.service gpio-server-switch.service buttons-power.service internet-led.service"
 SERVICES="${SERVICES:-}"
 
-log(){ echo "[$(date '+%F %T')] $*"; }
+log(){ echo "[$(date '+%F %T')] $*" >&2; }
 
 wait_for_network() {
   log "Esperando red…"

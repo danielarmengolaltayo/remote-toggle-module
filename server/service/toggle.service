@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=danielarmengolaltayo
-Group=danielarmengolaltayo
-WorkingDirectory=/home/danielarmengolaltayo/Desktop/remote-toggle-module/server
-ExecStart=/home/danielarmengolaltayo/Desktop/remote-toggle-module/server/scripts/run.sh
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/Desktop/remote-toggle-module/server
+ExecStart=/home/pi/Desktop/remote-toggle-module/server/scripts/run.sh
 Restart=on-failure
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1

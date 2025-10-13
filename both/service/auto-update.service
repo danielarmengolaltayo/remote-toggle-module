@@ -1,5 +1,5 @@
 [Unit]
-Description=Auto-update client code from Git on boot
+Description=Auto-update (shared) on boot
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=oneshot
 User=pi
 Group=pi
 WorkingDirectory=/home/pi
-ExecStart=/home/pi/Desktop/remote-toggle-module/client/scripts/auto_update_client.sh
+ExecStart=/home/pi/Desktop/remote-toggle-module/both/scripts/auto_update.sh
 StandardOutput=journal
 StandardError=journal
 

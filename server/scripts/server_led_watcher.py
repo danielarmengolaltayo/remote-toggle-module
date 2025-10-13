@@ -9,7 +9,7 @@ from pathlib import Path
 
 # ---------- Config ----------
 LED_PIN = 18                 # BOARD 18 (GPIO24)
-STATE_FILE = Path("/home/danielarmengolaltayo/Desktop/remote-toggle-module/server/state.json")  # ajusta si tu ruta es otra
+STATE_FILE = Path("/home/pi/Desktop/remote-toggle-module/server/state.json")  # ajusta si tu ruta es otra
 SERVICE_NAME = "toggle.service"
 
 CHECK_SVC_EVERY = 1.0        # s: frecuencia de chequeo del servicio

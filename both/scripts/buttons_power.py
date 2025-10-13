@@ -16,7 +16,7 @@ DRY_RUN = False
 SAFE_LOW_PINS = [13, 16, 18]  # boot LED, internet LED, server LED → ajusta si usas otros
 
 # Servicios que podrían tocar esos pines (pararlos antes de forzar LOW)
-SAFE_SERVICES = ["boot-led.service", "internet-led.service", "server-led.service"]
+SAFE_SERVICES = ["boot-led.service", "internet-led.path", "internet-led.service", "server-led.service"]
 
 def quiesce_services():
     # Para evitar que vuelvan a escribir en los GPIO tras nuestro "force low"
@@ -27,6 +27,12 @@ def quiesce_services():
         except Exception as e:
             print(f"[QUIESCE] stop {s}: {e}")
     time.sleep(0.15)  # pequeña espera a que paren (ajusta 100–300 ms)
+    for s in SAFE_SERVICES:
+        try:
+            subprocess.Popen(["/bin/systemctl", "reset-failed", s])
+        except Exception as e:
+            print(f"[QUIESCE] reset-failed {s}: {e}")
+    time.sleep(0.05)
 
 def force_all_low():
     import RPi.GPIO as GPIO

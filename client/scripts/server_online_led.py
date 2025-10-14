@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+import time, socket, ssl, http.client
+import RPi.GPIO as GPIO
+from pathlib import Path
+from urllib.parse import urlparse
+
+# === Config ===
+LED_PIN_BOARD = 29                      # BOARD 29 (BCM5)
+CONFIG_FILE = Path("/home/pi/Desktop/config-local/server.txt")
+TIMEOUT = 3.0                           # segundos para la petición
+INTERVAL_OK = 5.0                       # reintento si está OK
+INTERVAL_FAIL = 5.0                     # reintento si está KO (puedes subirlo si quieres)
+BOOT_READY_FLAG = Path("/run/boot-ready")  # arrancar tras boot (opcional)
+# ==============
+
+def load_target():
+    """Lee el host/URL del archivo de config y devuelve (host, path, use_https)."""
+    text = CONFIG_FILE.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"{CONFIG_FILE} está vacío.")
+    # Acepta 'pinya.ws' o URL completa
+    if "://" not in text:
+        text = "https://" + text
+    u = urlparse(text)
+    host = u.hostname
+    path = u.path if u.path else "/"
+    use_https = (u.scheme.lower() == "https")
+    if not host:
+        raise ValueError(f"No se pudo parsear host en {text}")
+    return host, path, use_https
+
+def check_head(host: str, path: str, use_https: bool, timeout: float) -> bool:
+    """True si responde 2xx/3xx a un HEAD; False si error/timeout/5xx."""
+    if use_https:
+        ctx = ssl.create_default_context()
+        conn = http.client.HTTPSConnection(host, timeout=timeout, context=ctx)
+    else:
+        conn = http.client.HTTPConnection(host, timeout=timeout)
+    try:
+        conn.request("HEAD", path or "/")
+        resp = conn.getresponse()
+        return 200 <= resp.status < 400
+    except (ssl.SSLError, socket.timeout, socket.gaierror, ConnectionError, OSError):
+        return False
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+def set_led(on: bool):
+    GPIO.output(LED_PIN_BOARD, GPIO.HIGH if on else GPIO.LOW)
+
+def main():
+    # Espera opcional a que el sistema haya anunciado boot listo
+    for _ in range(200):  # ~20s máx
+        if BOOT_READY_FLAG.exists():
+            break
+        time.sleep(0.1)
+
+    host, path, https = load_target()
+
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(LED_PIN_BOARD, GPIO.OUT, initial=GPIO.LOW)
+
+    try:
+        while True:
+            ok = check_head(host, path, https, TIMEOUT)
+            set_led(ok)
+            time.sleep(INTERVAL_OK if ok else INTERVAL_FAIL)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try: GPIO.cleanup()
+        except Exception: pass
+
+if __name__ == "__main__":
+    main()

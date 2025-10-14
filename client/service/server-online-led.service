@@ -1,0 +1,16 @@
+[Unit]
+Description=Cliente: LED de servidor online (lee server.txt)
+After=network-online.target internet-led.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/client/scripts/server_online_led.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

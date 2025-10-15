@@ -13,10 +13,10 @@ DRY_RUN = False
 # --------------
 
 # Pines a forzar a LOW (BOARD)
-SAFE_LOW_PINS = [13, 16, 18]  # boot LED, internet LED, server LED → ajusta si usas otros
+SAFE_LOW_PINS = [13, 16, 18, 29]  # boot LED, internet LED, server LED → ajusta si usas otros
 
 # Servicios que podrían tocar esos pines (pararlos antes de forzar LOW)
-SAFE_SERVICES = ["boot-led.service", "internet-led.path", "internet-led.service", "server-led.service"]
+SAFE_SERVICES = ["boot-led.service", "internet-led.path", "internet-led.service", "server-led.service", "server-online-led.service"]
 
 def quiesce_services():
     # Para evitar que vuelvan a escribir en los GPIO tras nuestro "force low"

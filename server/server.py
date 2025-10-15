@@ -1,7 +1,8 @@
-# --- imports habituales (ya los tendrás) ---
+# --- imports habituales ---
 from flask import Flask, jsonify, request
 import json, threading, time, os
 from datetime import datetime, timezone
+from flask import render_template
 
 # === WS: Flask-Sock ===
 from flask_sock import Sock
@@ -55,6 +56,14 @@ def _broadcast_update():
 
 # Cargar estado al arrancar
 _load_state()
+
+# --- 
+
+@app.get("/")
+def index():
+    # Puedes añadir headers para evitar cache agresivo detrás de CF si quieres
+    resp = render_template("index.html")
+    return resp
 
 # --- API HTTP existente (ajusta nombres si difiere) ---
 

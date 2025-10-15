@@ -1,59 +1,113 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <title>Toggle Raspberry Pi</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Remote Toggle</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; }
-    .card { max-width: 420px; border: 1px solid #ddd; border-radius: 12px; padding: 1.5rem; }
-    .state { font-size: 1.1rem; margin-bottom: 1rem; }
-    button { font-size: 1rem; padding: .6rem 1rem; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
-    .on { color: #0a0; font-weight: 600; }
-    .off { color: #a00; font-weight: 600; }
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; display: grid; place-items: center; min-height: 100svh; background: #0f172a; color: #e2e8f0; }
+    .card { background: #111827; padding: 1.25rem 1.5rem; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,.25); width: min(92vw, 420px); }
+    h1 { margin: 0 0 .5rem; font-size: 1.25rem; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .pill { display: inline-flex; align-items: center; gap: .5rem; background: #0b1324; padding: .5rem .75rem; border-radius: 999px; font-size: .9rem; }
+    .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #64748b; }
+    .dot.on { background: #22c55e; }
+    .dot.off { background: #ef4444; }
+    button { appearance: none; border: 0; padding: .7rem 1rem; border-radius: .7rem; font-weight: 600; cursor: pointer; background: #2563eb; color: white; }
+    button[disabled] { opacity: .6; cursor: not-allowed; }
+    .muted { color: #94a3b8; font-size: .9rem; margin-top: .75rem; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Interruptor</h1>
-    <p class="state">Estado: <span id="stateLabel">…</span></p>
-    <button id="toggleBtn">Cambiar estado</button>
+    <h1>Remote Toggle</h1>
+    <div class="row">
+      <div id="statePill" class="pill"><span id="dot" class="dot"></span><span id="stateTxt">—</span></div>
+      <button id="toggleBtn">Cambiar</button>
+    </div>
+    <div class="muted" id="connInfo">Conectando…</div>
   </div>
 
   <script>
-    const label = document.getElementById('stateLabel');
-    const btn = document.getElementById('toggleBtn');
+    const pill = document.getElementById('statePill');
+    const dot  = document.getElementById('dot');
+    const txt  = document.getElementById('stateTxt');
+    const btn  = document.getElementById('toggleBtn');
+    const info = document.getElementById('connInfo');
 
-    function renderState(s) {
-      label.textContent = s ? 'ON' : 'OFF';
-      label.className = s ? 'on' : 'off';
+    let current = null;   // estado boolean
+    let ws = null;
+
+    function render(value) {
+      current = !!value;
+      txt.textContent = current ? 'ON' : 'OFF';
+      dot.className = 'dot ' + (current ? 'on' : 'off');
+      pill.style.background = current ? '#052e1b' : '#2a0b0b';
     }
 
     async function fetchState() {
       try {
-        const r = await fetch('/state');
-        const data = await r.json();
-        renderState(!!data.state);
+        const r = await fetch('/api/state', {cache:'no-store'});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        render(j.value);
+        info.textContent = 'HTTP OK — snapshot cargado';
       } catch (e) {
-        label.textContent = 'Error al leer estado';
+        info.textContent = 'Error cargando estado: ' + e.message;
       }
     }
 
-    async function toggle() {
+    async function putState(value) {
       btn.disabled = true;
       try {
-        const r = await fetch('/toggle', { method: 'POST' });
-        const data = await r.json();
-        renderState(!!data.state);
+        const r = await fetch('/api/state', {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({value})
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        render(j.value); // eco inmediato por si WS tarda
       } catch (e) {
-        alert('No se pudo cambiar el estado');
+        alert('Error enviando: ' + e.message);
       } finally {
         btn.disabled = false;
       }
     }
 
-    btn.addEventListener('click', toggle);
-    fetchState();
+    function connectWS() {
+      try {
+        const scheme = (location.protocol === 'https:') ? 'wss' : 'ws';
+        ws = new WebSocket(`${scheme}://${location.host}/ws`);
+      } catch (e) {
+        info.textContent = 'WS no soportado en este entorno';
+        return;
+      }
+
+      ws.onopen = () => { info.textContent = 'WebSocket conectado'; };
+      ws.onclose = () => {
+        info.textContent = 'WS cerrado — reintentando…';
+        setTimeout(connectWS, 1500);
+      };
+      ws.onerror = () => { /* el onclose reintentará */ };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'snapshot' || msg.type === 'update') {
+            render(msg.value);
+          }
+        } catch (_) {}
+      };
+    }
+
+    btn.addEventListener('click', () => {
+      if (current === null) return;
+      putState(!current);
+    });
+
+    // Arranque
+    fetchState().then(connectWS);
   </script>
 </body>
 </html>

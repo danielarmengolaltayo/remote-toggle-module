@@ -1,0 +1,17 @@
+[Unit]
+Description=Cliente: runtime WS (botón + LED variable)
+After=network-online.target boot-led.service internet-led.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/home/pi/Desktop/remote-toggle-module/client
+ExecStart=/home/pi/Desktop/remote-toggle-module/client/.venv/bin/python /home/pi/Desktop/remote-toggle-module/client/scripts/client_runtime.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

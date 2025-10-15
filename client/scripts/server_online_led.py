@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import time, socket, ssl, http.client
 import RPi.GPIO as GPIO
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -46,8 +47,13 @@ def check_head(host: str, path: str, use_https: bool, timeout: float) -> bool:
         try: conn.close()
         except Exception: pass
 
+_prev_led = None
 def set_led(on: bool):
+    global _prev_led
     GPIO.output(LED_PIN_BOARD, GPIO.HIGH if on else GPIO.LOW)
+    if _prev_led is None or _prev_led != on:
+        print(f"[SERVER LED] -> {'ON' if on else 'OFF'}", flush=True)
+        _prev_led = on
 
 def main():
     # Espera opcional a que el sistema haya anunciado boot listo
@@ -57,6 +63,7 @@ def main():
         time.sleep(0.1)
 
     host, path, https = load_target()
+    print(f"[CFG] target={('https' if https else 'http')}://{host}{path or '/'}", flush=True)
 
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BOARD)

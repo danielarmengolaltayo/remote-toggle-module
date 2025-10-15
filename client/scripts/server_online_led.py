@@ -8,14 +8,17 @@ from urllib.parse import urlparse
 # === Config ===
 LED_PIN_BOARD = 29                      # BOARD 29 (BCM5)
 CONFIG_FILE = Path("/home/pi/Desktop/config-local/server.txt")
-TIMEOUT = 3.0                           # segundos para la petición
+TIMEOUT = 5.0                           # segundos para la petición (subido a 5s)
 INTERVAL_OK = 5.0                       # reintento si está OK
-INTERVAL_FAIL = 5.0                     # reintento si está KO (puedes subirlo si quieres)
+INTERVAL_FAIL = 5.0                     # reintento si está KO
 BOOT_READY_FLAG = Path("/run/boot-ready")  # arrancar tras boot (opcional)
+API_PATH = "/api/state"                 # endpoint real para comprobar el server
 # ==============
 
 def load_target():
-    """Lee el host/URL del archivo de config y devuelve (host, path, use_https)."""
+    """Lee host/URL del archivo de config y devuelve (host, path, use_https).
+       Ignoramos cualquier path del archivo y forzamos API_PATH.
+    """
     text = CONFIG_FILE.read_text(encoding="utf-8").strip()
     if not text:
         raise ValueError(f"{CONFIG_FILE} está vacío.")
@@ -24,28 +27,31 @@ def load_target():
         text = "https://" + text
     u = urlparse(text)
     host = u.hostname
-    path = u.path if u.path else "/"
     use_https = (u.scheme.lower() == "https")
     if not host:
         raise ValueError(f"No se pudo parsear host en {text}")
-    return host, path, use_https
+    return host, API_PATH, use_https
 
-def check_head(host: str, path: str, use_https: bool, timeout: float) -> bool:
-    """True si responde 2xx/3xx a un HEAD; False si error/timeout/5xx."""
+def check_http_get(host: str, path: str, use_https: bool, timeout: float) -> bool:
+    """True si el origen responde (no 5xx). Usamos GET a /api/state."""
+    headers = {"Connection": "close", "Accept": "application/json"}
     if use_https:
         ctx = ssl.create_default_context()
         conn = http.client.HTTPSConnection(host, timeout=timeout, context=ctx)
     else:
         conn = http.client.HTTPConnection(host, timeout=timeout)
     try:
-        conn.request("HEAD", path or "/")
+        conn.request("GET", path or "/", headers=headers)
         resp = conn.getresponse()
-        return 200 <= resp.status < 400
+        # Consideramos "online" si no es 5xx (puedes endurecer a 200–399 si prefieres)
+        return resp.status < 500
     except (ssl.SSLError, socket.timeout, socket.gaierror, ConnectionError, OSError):
         return False
     finally:
-        try: conn.close()
-        except Exception: pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 _prev_led = None
 def set_led(on: bool):
@@ -63,7 +69,7 @@ def main():
         time.sleep(0.1)
 
     host, path, https = load_target()
-    print(f"[CFG] target={('https' if https else 'http')}://{host}{path or '/'}", flush=True)
+    print(f"[CFG] target={('https' if https else 'http')}://{host}{path}", flush=True)
 
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BOARD)
@@ -71,14 +77,16 @@ def main():
 
     try:
         while True:
-            ok = check_head(host, path, https, TIMEOUT)
+            ok = check_http_get(host, path, https, TIMEOUT)
             set_led(ok)
             time.sleep(INTERVAL_OK if ok else INTERVAL_FAIL)
     except KeyboardInterrupt:
         pass
     finally:
-        try: GPIO.cleanup()
-        except Exception: pass
+        try:
+            GPIO.cleanup()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

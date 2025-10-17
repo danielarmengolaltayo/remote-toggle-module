@@ -2,6 +2,7 @@
 Description=Cliente: runtime WS (botón + LED variable)
 After=network-online.target boot-led.service internet-led.service
 Wants=network-online.target
+ConditionPathExists=/run/boot-ready
 
 [Service]
 Type=simple

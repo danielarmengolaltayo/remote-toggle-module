@@ -1,5 +1,8 @@
 [Unit]
 Description=Internet connectivity LED (client)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/run/boot-ready
 
 [Service]
 Type=simple

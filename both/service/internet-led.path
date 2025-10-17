@@ -3,6 +3,7 @@ Description=Start internet-led when /run/boot-ready exists (client)
 
 [Path]
 PathExists=/run/boot-ready
+Unit=internet-led.service
 
 [Install]
 WantedBy=multi-user.target

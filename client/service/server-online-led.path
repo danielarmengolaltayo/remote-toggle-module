@@ -1,0 +1,9 @@
+[Unit]
+Description=Arranca server-online-led cuando boot está listo
+
+[Path]
+PathExists=/run/boot-ready
+Unit=server-online-led.service
+
+[Install]
+WantedBy=multi-user.target

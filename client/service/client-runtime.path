@@ -1,0 +1,9 @@
+[Unit]
+Description=Arranca client-runtime cuando boot está listo
+
+[Path]
+PathExists=/run/boot-ready
+Unit=client-runtime.service
+
+[Install]
+WantedBy=multi-user.target

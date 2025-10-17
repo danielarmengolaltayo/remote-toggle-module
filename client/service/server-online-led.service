@@ -2,6 +2,7 @@
 Description=Cliente: LED de servidor online (lee server.txt)
 After=network-online.target internet-led.service
 Wants=network-online.target
+ConditionPathExists=/run/boot-ready
 
 [Service]
 Type=simple

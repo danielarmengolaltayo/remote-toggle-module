@@ -4,10 +4,9 @@ from flask import Flask, jsonify, request, render_template
 from pathlib import Path
 import json, time, threading
 
-APP_ROOT = Path(__file__).resolve().parents[1]          # .../server
-DATA_DIR = APP_ROOT / "data"                             # crea esta carpeta si no existe
-DATA_DIR.mkdir(exist_ok=True)
-STATE_FILE = DATA_DIR / "state.json"
+# === RUTAS BASE ===
+APP_ROOT = Path(__file__).resolve().parent          # .../server
+STATE_FILE = APP_ROOT / "state.json"                # .../server/state.json
 
 # --- Estado in-memory ---
 # Estructura canónica
@@ -51,7 +50,11 @@ def save_state():
     with STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(_state, f, ensure_ascii=False, indent=2)
 
-app = Flask(__name__, template_folder=str(APP_ROOT / "templates"), static_folder=None)
+app = Flask(
+    __name__,
+    template_folder=str(APP_ROOT / "templates"),    # .../server/templates/index.html
+    static_folder=None
+)
 
 @app.before_first_request
 def _init():

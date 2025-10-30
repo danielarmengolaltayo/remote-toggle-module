@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
-# Cliente: LED y botón para 'toggle' (REST)
-import time, json, http.client, ssl, socket, sys
+# Cliente: LED y botón para 'toggle' (REST) con fallback a polling si falla la interrupción.
+import time, json, http.client, ssl, socket
 from pathlib import Path
 import RPi.GPIO as GPIO
 
 # === Pines (BOARD) ===
-LED_TOGGLE = 33   # ya lo usas para el LED de 'toggle'
-BTN_TOGGLE = 31   # ya lo usas para el botón de 'toggle'
+LED_TOGGLE = 33   # LED de 'toggle'
+BTN_TOGGLE = 31   # Botón de 'toggle' (a GND, pull-up interno)
 
 # === Config ===
 CONFIG_DIR = Path("/home/pi/Desktop/config-local")
-SERVER_TXT = CONFIG_DIR / "server.txt"      # contiene host o URL (p.ej. pinya.ws o https://pinya.ws/)
+SERVER_TXT = CONFIG_DIR / "server.txt"      # p.ej. 'pinya.ws' o 'https://pinya.ws/'
 STATE_LOCAL = Path("/home/pi/Desktop/remote-toggle-module/client/state_local.json")
 BOOT_READY_FLAG = Path("/run/boot-ready")
 POLL_OK = 0.5      # s entre lecturas si OK
 POLL_KO = 2.0      # s entre reintentos si KO
 TIMEOUT = 3.0
 
-# === Utilidades HTTP (sin dependencias externas) ===
+# === Utilidades HTTP ===
 def load_target():
     txt = SERVER_TXT.read_text(encoding="utf-8").strip()
     if "://" not in txt:
         txt = "https://" + txt
-    # parse manual mínimo
     use_https = txt.startswith("https://")
     host_path = txt.split("://", 1)[1]
     if "/" in host_path:
@@ -33,17 +32,13 @@ def load_target():
     return use_https, host, path
 
 def http_get_json(host, use_https):
-    if use_https:
-        ctx = ssl.create_default_context()
-        conn = http.client.HTTPSConnection(host, timeout=TIMEOUT, context=ctx)
-    else:
-        conn = http.client.HTTPConnection(host, timeout=TIMEOUT)
+    conn = (http.client.HTTPSConnection(host, timeout=TIMEOUT, context=ssl.create_default_context())
+            if use_https else http.client.HTTPConnection(host, timeout=TIMEOUT))
     try:
         conn.request("GET", "/api/state")
         resp = conn.getresponse()
         if 200 <= resp.status < 300:
-            data = resp.read()
-            return json.loads(data.decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
         return None
     finally:
         try: conn.close()
@@ -52,11 +47,8 @@ def http_get_json(host, use_https):
 def http_put_toggle(host, use_https, new_value, ts_ms):
     body = json.dumps({"value": bool(new_value), "ts": int(ts_ms)}).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    if use_https:
-        ctx = ssl.create_default_context()
-        conn = http.client.HTTPSConnection(host, timeout=TIMEOUT, context=ctx)
-    else:
-        conn = http.client.HTTPConnection(host, timeout=TIMEOUT)
+    conn = (http.client.HTTPSConnection(host, timeout=TIMEOUT, context=ssl.create_default_context())
+            if use_https else http.client.HTTPConnection(host, timeout=TIMEOUT))
     try:
         conn.request("PUT", "/api/state/toggle", body=body, headers=headers)
         resp = conn.getresponse()
@@ -75,21 +67,14 @@ def gpio_setup():
 def led_set(on: bool):
     GPIO.output(LED_TOGGLE, GPIO.HIGH if on else GPIO.LOW)
 
-# === Persistencia local sencilla (opcional, para futuro) ===
+# === Persistencia local (no imprescindible ahora) ===
 def local_write(state):
     try:
         STATE_LOCAL.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     except: pass
 
-def local_read():
-    try:
-        return json.loads(STATE_LOCAL.read_text(encoding="utf-8"))
-    except:
-        return {}
-
-# === Main loop ===
 def main():
-    # Espera a boot listo para no encender LED antes de tiempo
+    # Espera a boot listo
     for _ in range(200):
         if BOOT_READY_FLAG.exists():
             break
@@ -100,17 +85,17 @@ def main():
 
     gpio_setup()
 
+    # Estado cacheado para LED
     last_toggle = None
 
-    def on_button(channel):
-        # Pulsación activa a LOW (pull-up interno)
+    # --- Intento de interrupción + callback ---
+    use_polling_button = False
+    def on_button(_ch=None):
         try:
-            # lee estado actual del LED para inferir el próximo
-            current = GPIO.input(LED_TOGGLE) == GPIO.HIGH
+            current = (GPIO.input(LED_TOGGLE) == GPIO.HIGH)
             new_val = not current
             ok = http_put_toggle(host, use_https, new_val, time.time()*1000)
             if ok:
-                # optimista: refleja ya en LED
                 led_set(new_val)
                 print(f"[BTN] toggle -> {new_val}", flush=True)
             else:
@@ -118,20 +103,48 @@ def main():
         except Exception as e:
             print(f"[BTN] error: {e}", flush=True)
 
-    # Detecta flanco de bajada (pulsador a GND)
-    GPIO.add_event_detect(BTN_TOGGLE, GPIO.FALLING, callback=on_button, bouncetime=200)
+    try:
+        GPIO.add_event_detect(BTN_TOGGLE, GPIO.FALLING, callback=on_button, bouncetime=200)
+        print("[GPIO] edge-detect ENABLED", flush=True)
+    except RuntimeError:
+        use_polling_button = True
+        print("[GPIO] edge-detect FAILED, falling back to POLLING", flush=True)
+
+    # Variables para polling del botón (si hiciera falta)
+    last_btn = GPIO.input(BTN_TOGGLE)  # 1=libre, 0=presionado
+    last_change_t = time.time()
 
     try:
         while True:
+            # 1) Sincroniza LED con el servidor
             try:
                 data = http_get_json(host, use_https)
                 if data is not None and "toggle" in data:
                     if data["toggle"] != last_toggle:
                         led_set(bool(data["toggle"]))
                         last_toggle = bool(data["toggle"])
-                time.sleep(POLL_OK if data is not None else POLL_KO)
+                interval = POLL_OK if data is not None else POLL_KO
             except (socket.timeout, ssl.SSLError, OSError, ConnectionError, json.JSONDecodeError):
-                time.sleep(POLL_KO)
+                interval = POLL_KO
+
+            # 2) Si no hay interrupción, sondea el botón con debounce simple
+            if use_polling_button:
+                now = time.time()
+                btn = GPIO.input(BTN_TOGGLE)
+                if btn != last_btn:
+                    last_btn = btn
+                    last_change_t = now
+                # estable durante 40 ms y flanco de bajada => “pulsado”
+                if (now - last_change_t) >= 0.04 and btn == 0:
+                    on_button()                 # ejecuta acción
+                    # espera a que se suelte para evitar repeticiones
+                    while GPIO.input(BTN_TOGGLE) == 0:
+                        time.sleep(0.02)
+                    last_btn = 1
+                    last_change_t = time.time()
+
+            time.sleep(interval)
+
     except KeyboardInterrupt:
         pass
     finally:

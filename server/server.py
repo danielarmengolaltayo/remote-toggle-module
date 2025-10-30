@@ -1,143 +1,109 @@
-# --- imports habituales ---
-from flask import Flask, jsonify, request
-import json, threading, time, os
-from datetime import datetime, timezone
-from flask import render_template
+# server/scripts/server.py
+#!/usr/bin/env python3
+from flask import Flask, jsonify, request, render_template
+from pathlib import Path
+import json, time, threading
 
-# === WS: Flask-Sock ===
-from flask_sock import Sock
+APP_ROOT = Path(__file__).resolve().parents[1]          # .../server
+DATA_DIR = APP_ROOT / "data"                             # crea esta carpeta si no existe
+DATA_DIR.mkdir(exist_ok=True)
+STATE_FILE = DATA_DIR / "state.json"
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(APP_DIR, "state.json")   # servidor guarda aquí {value, version}
-
-app = Flask(__name__)
-sock = Sock(app)   # <- WS
-
-# Estado en memoria + lock
+# --- Estado in-memory ---
+# Estructura canónica
+DEFAULT_STATE = {
+    "toggle": False,
+    "client1": False,
+    "client2": False,
+    "ts": {
+        "toggle": 0,
+        "client1": 0,
+        "client2": 0
+    }
+}
 _state_lock = threading.Lock()
-_state = {"value": False, "version": "1970-01-01T00:00:00Z"}
+_state = None  # se carga desde disco o DEFAULT_STATE
 
-# Conexiones WS activas (objetos WebSocket)
-_ws_peers = set()
-_ws_peers_lock = threading.Lock()
+def _now_ts() -> int:
+    return int(time.time() * 1000)
 
-def _now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-def _load_state():
+def load_state():
     global _state
-    if os.path.exists(STATE_FILE):
+    if STATE_FILE.exists():
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with STATE_FILE.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, dict) and "value" in data and "version" in data:
-                    _state = data
-        except Exception as e:
-            print("[WARN] load_state:", e)
+        except Exception:
+            data = DEFAULT_STATE.copy()
+    else:
+        data = DEFAULT_STATE.copy()
 
-def _save_state():
-    tmp = STATE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(_state, f, ensure_ascii=False)
-    os.replace(tmp, STATE_FILE)
+    # normaliza claves obligatorias
+    for k in ("toggle","client1","client2"):
+        if k not in data: data[k] = False
+    if "ts" not in data or not isinstance(data["ts"], dict):
+        data["ts"] = {}
+    for k in ("toggle","client1","client2"):
+        if k not in data["ts"]: data["ts"][k] = 0
+    _state = data
 
-def _broadcast_update():
-    """Difunde el estado actual a todos los WS conectados."""
-    msg = json.dumps({"type": "update", "value": _state["value"], "version": _state["version"]})
-    with _ws_peers_lock:
-        dead = []
-        for ws in list(_ws_peers):
-            try:
-                ws.send(msg)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            _ws_peers.discard(ws)
+def save_state():
+    with STATE_FILE.open("w", encoding="utf-8") as f:
+        json.dump(_state, f, ensure_ascii=False, indent=2)
 
-# Cargar estado al arrancar
-_load_state()
+app = Flask(__name__, template_folder=str(APP_ROOT / "templates"), static_folder=None)
 
-# --- 
+@app.before_first_request
+def _init():
+    load_state()
 
+# --- Helpers de autorización mínima (placeholder) ---
+def get_client_id():
+    # Para más adelante: cabeceras X-Client / X-Token.
+    # De momento solo retornamos None y no restringimos nada.
+    return request.headers.get("X-Client")
+
+# --- Rutas HTML ---
 @app.get("/")
-def index():
-    # Puedes añadir headers para evitar cache agresivo detrás de CF si quieres
-    resp = render_template("index.html")
-    return resp
+def page_index():
+    # Render de página de pruebas con 3 toggles
+    return render_template("index.html")
 
-# --- API HTTP existente (ajusta nombres si difiere) ---
-
+# --- API REST ---
 @app.get("/api/state")
 def api_get_state():
-    # Devuelve estado actual y ETag simple con version
     with _state_lock:
-        data = dict(_state)
-    resp = jsonify(data)
-    resp.headers["ETag"] = data["version"]
-    return resp, 200
+        return jsonify(_state)
 
-@app.put("/api/state")
-def api_put_state():
-    """Actualiza el estado desde HTTP (p.ej., admin o cliente vía polling).
-       También difunde por WS.
-    """
+@app.put("/api/state/<key>")
+def api_put_key(key):
+    key = key.strip().lower()
+    if key not in ("toggle","client1","client2"):
+        return jsonify({"error":"unknown key"}), 400
+
     body = request.get_json(silent=True) or {}
     if "value" not in body:
-        return jsonify({"error": "missing 'value'"}), 400
+        return jsonify({"error":"missing 'value'"}), 400
+
+    # Reglas de autorización (placeholder, sin aplicar aún):
+    # - toggle: cualquier cliente
+    # - client1: solo c1
+    # - client2: solo c2
+    # Aquí de momento no bloqueamos nada (lo haremos en un paso posterior).
+    # client_id = get_client_id()
+
     val = bool(body["value"])
+    ts  = int(body.get("ts", _now_ts()))
+
     with _state_lock:
-        _state["value"] = val
-        _state["version"] = _now_iso()
-        _save_state()
-        print(f"[STATE] HTTP PUT -> value={_state['value']} version={_state['version']}")
-    _broadcast_update()
-    return jsonify(_state), 200
+        # Actualiza valor y timestamp por clave
+        _state[key] = val
+        _state["ts"][key] = ts
+        save_state()
 
-# --- WS endpoint ---
-@sock.route("/ws")
-def ws_endpoint(ws):
-    """Protocolo:
-       <- {"type":"snapshot","value":bool,"version":"..."}
-       <- {"type":"update","value":bool,"version":"..."} (cuando cambie)
-       -> {"type":"set","value":bool} (de un cliente)
-       (Opcional futuro: "ping"/"pong")
-    """
-    # Registrar peer
-    with _ws_peers_lock:
-        _ws_peers.add(ws)
+        # Para compatibilidad, retornamos el estado completo
+        return jsonify(_state), 200
 
-    # Enviar snapshot inicial
-    with _state_lock:
-        snap = json.dumps({"type": "snapshot", "value": _state["value"], "version": _state["version"]})
-    try:
-        ws.send(snap)
-    except Exception:
-        with _ws_peers_lock:
-            _ws_peers.discard(ws)
-        return
-
-    # Bucle de mensajes
-    try:
-        while True:
-            raw = ws.receive()
-            if raw is None:
-                break  # conexión cerrada
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                continue
-            # Mensaje del cliente para cambiar estado
-            if msg.get("type") == "set" and "value" in msg:
-                val = bool(msg["value"])
-                with _state_lock:
-                    _state["value"] = val
-                    _state["version"] = _now_iso()
-                    _save_state()
-                    print(f"[STATE] WS SET -> value={_state['value']} version={_state['version']}")
-                _broadcast_update()
-            # (si quieres aceptar "pong", ignóralo o registra)
-    except Exception as e:
-        print("[WS] error:", e)
-    finally:
-        with _ws_peers_lock:
-            _ws_peers.discard(ws)
+if __name__ == "__main__":
+    # Solo para desarrollo local manual
+    app.run(host="0.0.0.0", port=5000, debug=False)

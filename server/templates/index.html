@@ -3,111 +3,115 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Remote Toggle</title>
+  <title>Remote Toggle – Estado</title>
   <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    body { margin: 0; display: grid; place-items: center; min-height: 100svh; background: #0f172a; color: #e2e8f0; }
-    .card { background: #111827; padding: 1.25rem 1.5rem; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,.25); width: min(92vw, 420px); }
-    h1 { margin: 0 0 .5rem; font-size: 1.25rem; }
-    .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-    .pill { display: inline-flex; align-items: center; gap: .5rem; background: #0b1324; padding: .5rem .75rem; border-radius: 999px; font-size: .9rem; }
-    .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #64748b; }
-    .dot.on { background: #22c55e; }
-    .dot.off { background: #ef4444; }
-    button { appearance: none; border: 0; padding: .7rem 1rem; border-radius: .7rem; font-weight: 600; cursor: pointer; background: #2563eb; color: white; }
-    button[disabled] { opacity: .6; cursor: not-allowed; }
-    .muted { color: #94a3b8; font-size: .9rem; margin-top: .75rem; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+    h1 { margin-bottom: 0.25rem; }
+    .grid { display: grid; grid-template-columns: 160px 120px 160px; gap: 0.5rem 1rem; align-items: center; max-width: 540px; }
+    .key { font-weight: 600; }
+    .led { width: 12px; height: 12px; border-radius: 999px; border: 1px solid #999; display: inline-block; vertical-align: middle; margin-right: 8px; }
+    .on { background: #0bd80b; border-color: #0a0; }
+    .off { background: #ddd; }
+    button { padding: 6px 10px; }
+    .ts { font-size: 12px; color: #666; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Remote Toggle</h1>
-    <div class="row">
-      <div id="statePill" class="pill"><span id="dot" class="dot"></span><span id="stateTxt">—</span></div>
-      <button id="toggleBtn">Cambiar</button>
-    </div>
-    <div class="muted" id="connInfo">Conectando…</div>
+  <h1>Estado del servidor</h1>
+  <p class="ts" id="ts"></p>
+
+  <div class="grid">
+    <div class="key"><span class="led" id="led-toggle"></span>toggle</div>
+    <div id="val-toggle">—</div>
+    <div><button id="btn-toggle">Alternar</button></div>
+
+    <div class="key"><span class="led" id="led-client1"></span>client1</div>
+    <div id="val-client1">—</div>
+    <div><button id="btn-client1">Alternar</button></div>
+
+    <div class="key"><span class="led" id="led-client2"></span>client2</div>
+    <div id="val-client2">—</div>
+    <div><button id="btn-client2">Alternar</button></div>
   </div>
 
   <script>
-    const pill = document.getElementById('statePill');
-    const dot  = document.getElementById('dot');
-    const txt  = document.getElementById('stateTxt');
-    const btn  = document.getElementById('toggleBtn');
-    const info = document.getElementById('connInfo');
+    const els = {
+      ts: document.getElementById('ts'),
+      led: {
+        toggle: document.getElementById('led-toggle'),
+        client1: document.getElementById('led-client1'),
+        client2: document.getElementById('led-client2'),
+      },
+      val: {
+        toggle: document.getElementById('val-toggle'),
+        client1: document.getElementById('val-client1'),
+        client2: document.getElementById('val-client2'),
+      },
+      btn: {
+        toggle: document.getElementById('btn-toggle'),
+        client1: document.getElementById('btn-client1'),
+        client2: document.getElementById('btn-client2'),
+      }
+    };
 
-    let current = null;   // estado boolean
-    let ws = null;
+    function setRow(key, on, ts) {
+      els.led[key].className = 'led ' + (on ? 'on' : 'off');
+      els.val[key].textContent = on ? 'ON' : 'OFF';
+    }
 
-    function render(value) {
-      current = !!value;
-      txt.textContent = current ? 'ON' : 'OFF';
-      dot.className = 'dot ' + (current ? 'on' : 'off');
-      pill.style.background = current ? '#052e1b' : '#2a0b0b';
+    function setTs(tsObj) {
+      try {
+        const tmax = Math.max(tsObj.toggle||0, tsObj.client1||0, tsObj.client2||0);
+        if (tmax > 0) {
+          const d = new Date(tmax);
+          els.ts.textContent = 'Última actualización: ' + d.toLocaleString();
+        } else {
+          els.ts.textContent = '';
+        }
+      } catch (e) {
+        els.ts.textContent = '';
+      }
     }
 
     async function fetchState() {
-      try {
-        const r = await fetch('/api/state', {cache:'no-store'});
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const j = await r.json();
-        render(j.value);
-        info.textContent = 'HTTP OK — snapshot cargado';
-      } catch (e) {
-        info.textContent = 'Error cargando estado: ' + e.message;
-      }
+      const resp = await fetch('/api/state');
+      const data = await resp.json();
+      setRow('toggle', !!data.toggle, data.ts?.toggle);
+      setRow('client1', !!data.client1, data.ts?.client1);
+      setRow('client2', !!data.client2, data.ts?.client2);
+      if (data.ts) setTs(data.ts);
     }
 
-    async function putState(value) {
-      btn.disabled = true;
-      try {
-        const r = await fetch('/api/state', {
-          method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({value})
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const j = await r.json();
-        render(j.value); // eco inmediato por si WS tarda
-      } catch (e) {
-        alert('Error enviando: ' + e.message);
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    function connectWS() {
-      try {
-        const scheme = (location.protocol === 'https:') ? 'wss' : 'ws';
-        ws = new WebSocket(`${scheme}://${location.host}/ws`);
-      } catch (e) {
-        info.textContent = 'WS no soportado en este entorno';
+    async function putKey(key, value) {
+      const body = { value: !!value, ts: Date.now() };
+      const resp = await fetch('/api/state/' + key, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        alert('Error al actualizar: ' + resp.status);
         return;
       }
-
-      ws.onopen = () => { info.textContent = 'WebSocket conectado'; };
-      ws.onclose = () => {
-        info.textContent = 'WS cerrado — reintentando…';
-        setTimeout(connectWS, 1500);
-      };
-      ws.onerror = () => { /* el onclose reintentará */ };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'snapshot' || msg.type === 'update') {
-            render(msg.value);
-          }
-        } catch (_) {}
-      };
+      await fetchState();
     }
 
-    btn.addEventListener('click', () => {
-      if (current === null) return;
-      putState(!current);
-    });
+    els.btn.toggle.onclick = async () => {
+      const v = els.val.toggle.textContent.trim().toUpperCase() === 'ON';
+      await putKey('toggle', !v);
+    };
+    els.btn.client1.onclick = async () => {
+      const v = els.val.client1.textContent.trim().toUpperCase() === 'ON';
+      await putKey('client1', !v);
+    };
+    els.btn.client2.onclick = async () => {
+      const v = els.val.client2.textContent.trim().toUpperCase() === 'ON';
+      await putKey('client2', !v);
+    };
 
-    // Arranque
-    fetchState().then(connectWS);
+    fetchState();
+    // refresco simple por si hay cambios externos (hasta que activemos WS)
+    setInterval(fetchState, 2000);
   </script>
 </body>
 </html>

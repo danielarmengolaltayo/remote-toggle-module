@@ -6,7 +6,7 @@ import RPi.GPIO as GPIO
 
 # === Pines (BOARD) ===
 LED_TOGGLE = 33   # LED de 'toggle'
-BTN_TOGGLE = 31   # Botón de 'toggle' (a GND, pull-up interno)
+BTN_TOGGLE = 37   # Botón de 'toggle' (a GND, pull-up interno)
 
 # === Config ===
 CONFIG_DIR   = Path("/home/pi/Desktop/config-local")

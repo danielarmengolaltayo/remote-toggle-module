@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Cliente: LED y botón para 'toggle' (REST) con fallback a polling si falla la interrupción.
-import time, json, http.client, ssl, socket
+# Cliente: LED y botón para 'toggle' (REST) con respuesta inmediata (threads)
+import time, json, http.client, ssl, socket, threading
 from pathlib import Path
 import RPi.GPIO as GPIO
 
@@ -9,15 +9,15 @@ LED_TOGGLE = 33   # LED de 'toggle'
 BTN_TOGGLE = 31   # Botón de 'toggle' (a GND, pull-up interno)
 
 # === Config ===
-CONFIG_DIR = Path("/home/pi/Desktop/config-local")
-SERVER_TXT = CONFIG_DIR / "server.txt"      # p.ej. 'pinya.ws' o 'https://pinya.ws/'
-STATE_LOCAL = Path("/home/pi/Desktop/remote-toggle-module/client/state_local.json")
-BOOT_READY_FLAG = Path("/run/boot-ready")
-POLL_OK = 0.5      # s entre lecturas si OK
-POLL_KO = 2.0      # s entre reintentos si KO
-TIMEOUT = 3.0
+CONFIG_DIR   = Path("/home/pi/Desktop/config-local")
+SERVER_TXT   = CONFIG_DIR / "server.txt"   # p.ej. 'pinya.ws' o 'https://pinya.ws/'
+BOOT_READY   = Path("/run/boot-ready")
+POLL_OK      = 0.2     # s entre lecturas del servidor si OK
+POLL_KO      = 1.0     # s si KO
+TIMEOUT      = 3.0
+DEBOUNCE_S   = 0.04    # 40 ms
 
-# === Utilidades HTTP ===
+# === HTTP helpers ===
 def load_target():
     txt = SERVER_TXT.read_text(encoding="utf-8").strip()
     if "://" not in txt:
@@ -67,17 +67,95 @@ def gpio_setup():
 def led_set(on: bool):
     GPIO.output(LED_TOGGLE, GPIO.HIGH if on else GPIO.LOW)
 
-# === Persistencia local (no imprescindible ahora) ===
-def local_write(state):
+# === Estado compartido ===
+state_lock = threading.Lock()
+cached_toggle = None
+stop_flag = False
+
+# === Hilo: botón inmediato ===
+def button_thread(host, use_https):
+    global cached_toggle
+    # Intenta interrupción; si falla, usa sondeo rápido
     try:
-        STATE_LOCAL.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    except: pass
+        def on_edge(_ch):
+            try:
+                with state_lock:
+                    current = (GPIO.input(LED_TOGGLE) == GPIO.HIGH)
+                new_val = not current
+                ok = http_put_toggle(host, use_https, new_val, time.time()*1000)
+                if ok:
+                    with state_lock:
+                        cached_toggle = new_val
+                    led_set(new_val)  # feedback instantáneo
+                    print(f"[BTN] toggle -> {new_val}", flush=True)
+                else:
+                    print("[BTN] PUT failed", flush=True)
+            except Exception as e:
+                print(f"[BTN] error: {e}", flush=True)
+        # limpia posible registro previo y registra
+        try:
+            GPIO.remove_event_detect(BTN_TOGGLE)
+        except Exception:
+            pass
+        GPIO.add_event_detect(BTN_TOGGLE, GPIO.FALLING, callback=on_edge, bouncetime=200)
+        print("[GPIO] edge-detect ENABLED", flush=True)
+        # solo duerme; el callback hará el trabajo
+        while not stop_flag:
+            time.sleep(0.2)
+        return
+    except RuntimeError:
+        print("[GPIO] edge-detect FAILED, falling back to POLLING", flush=True)
+
+    # Polling rápido con debounce software
+    last_btn = GPIO.input(BTN_TOGGLE)
+    stable_since = time.time()
+    pressed_handled = False
+    while not stop_flag:
+        now = time.time()
+        val = GPIO.input(BTN_TOGGLE)  # 1=libre, 0=presionado
+        if val != last_btn:
+            last_btn = val
+            stable_since = now
+            pressed_handled = False
+        if (now - stable_since) >= DEBOUNCE_S:
+            if val == 0 and not pressed_handled:
+                try:
+                    with state_lock:
+                        current = (GPIO.input(LED_TOGGLE) == GPIO.HIGH)
+                    new_val = not current
+                    ok = http_put_toggle(host, use_https, new_val, time.time()*1000)
+                    if ok:
+                        with state_lock:
+                            cached_toggle = new_val
+                        led_set(new_val)
+                        print(f"[BTN] toggle -> {new_val}", flush=True)
+                    else:
+                        print("[BTN] PUT failed", flush=True)
+                except Exception as e:
+                    print(f"[BTN] error: {e}", flush=True)
+                pressed_handled = True
+        time.sleep(0.01)  # 10 ms
+
+# === Hilo: poll del servidor ===
+def server_poll_thread(host, use_https):
+    global cached_toggle
+    while not stop_flag:
+        try:
+            data = http_get_json(host, use_https)
+            if data is not None and "toggle" in data:
+                t = bool(data["toggle"])
+                with state_lock:
+                    if t != cached_toggle:
+                        cached_toggle = t
+                        led_set(t)
+            time.sleep(POLL_OK if data is not None else POLL_KO)
+        except (socket.timeout, ssl.SSLError, OSError, ConnectionError, json.JSONDecodeError):
+            time.sleep(POLL_KO)
 
 def main():
     # Espera a boot listo
     for _ in range(200):
-        if BOOT_READY_FLAG.exists():
-            break
+        if BOOT_READY.exists(): break
         time.sleep(0.1)
 
     use_https, host, _ = load_target()
@@ -85,69 +163,31 @@ def main():
 
     gpio_setup()
 
-    # Estado cacheado para LED
-    last_toggle = None
-
-    # --- Intento de interrupción + callback ---
-    use_polling_button = False
-    def on_button(_ch=None):
-        try:
-            current = (GPIO.input(LED_TOGGLE) == GPIO.HIGH)
-            new_val = not current
-            ok = http_put_toggle(host, use_https, new_val, time.time()*1000)
-            if ok:
-                led_set(new_val)
-                print(f"[BTN] toggle -> {new_val}", flush=True)
-            else:
-                print("[BTN] PUT failed", flush=True)
-        except Exception as e:
-            print(f"[BTN] error: {e}", flush=True)
-
+    # Inicializa LED según estado del servidor (si responde)
     try:
-        GPIO.add_event_detect(BTN_TOGGLE, GPIO.FALLING, callback=on_button, bouncetime=200)
-        print("[GPIO] edge-detect ENABLED", flush=True)
-    except RuntimeError:
-        use_polling_button = True
-        print("[GPIO] edge-detect FAILED, falling back to POLLING", flush=True)
+        data = http_get_json(host, use_https)
+        if data and "toggle" in data:
+            t = bool(data["toggle"])
+            with state_lock:
+                global cached_toggle
+                cached_toggle = t
+            led_set(t)
+    except Exception:
+        pass
 
-    # Variables para polling del botón (si hiciera falta)
-    last_btn = GPIO.input(BTN_TOGGLE)  # 1=libre, 0=presionado
-    last_change_t = time.time()
+    # Lanza hilos
+    tb = threading.Thread(target=button_thread, args=(host, use_https), daemon=True)
+    ts = threading.Thread(target=server_poll_thread, args=(host, use_https), daemon=True)
+    tb.start(); ts.start()
 
     try:
         while True:
-            # 1) Sincroniza LED con el servidor
-            try:
-                data = http_get_json(host, use_https)
-                if data is not None and "toggle" in data:
-                    if data["toggle"] != last_toggle:
-                        led_set(bool(data["toggle"]))
-                        last_toggle = bool(data["toggle"])
-                interval = POLL_OK if data is not None else POLL_KO
-            except (socket.timeout, ssl.SSLError, OSError, ConnectionError, json.JSONDecodeError):
-                interval = POLL_KO
-
-            # 2) Si no hay interrupción, sondea el botón con debounce simple
-            if use_polling_button:
-                now = time.time()
-                btn = GPIO.input(BTN_TOGGLE)
-                if btn != last_btn:
-                    last_btn = btn
-                    last_change_t = now
-                # estable durante 40 ms y flanco de bajada => “pulsado”
-                if (now - last_change_t) >= 0.04 and btn == 0:
-                    on_button()                 # ejecuta acción
-                    # espera a que se suelte para evitar repeticiones
-                    while GPIO.input(BTN_TOGGLE) == 0:
-                        time.sleep(0.02)
-                    last_btn = 1
-                    last_change_t = time.time()
-
-            time.sleep(interval)
-
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
+        global stop_flag
+        stop_flag = True
         try: GPIO.cleanup()
         except: pass
 

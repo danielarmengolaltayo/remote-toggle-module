@@ -163,22 +163,25 @@ class _BtnWatcher(threading.Thread):
 
 # callbacks de botones
 def on_press_toggle(ts_ms: int):
+    print(f"[CALL] toggle -> value will be {not state['toggle']} ts={ts_ms}", flush=True)
     with lock:
         state["toggle"] = not state["toggle"]
         state["ts"]["toggle"] = ts_ms
         leds_apply()
         state_save()
-    # empuje best-effort (toggle es libre)
-    threading.Thread(target=put_key, args=("toggle", state["toggle"], ts_ms, None), daemon=True).start()
+    # llamada directa (sin hilo) para ver el log [HTTP]
+    put_key("toggle", state["toggle"], ts_ms, None)
 
 def on_press_client1(ts_ms: int):
+    print(f"[CALL] client1 -> value will be {not state['client1']} ts={ts_ms}", flush=True)
     with lock:
         state["client1"] = not state["client1"]
         state["ts"]["client1"] = ts_ms
         leds_apply()
         state_save()
-    # empuje con auth mínima (X-Client: client1)
-    threading.Thread(target=put_key, args=("client1", state["client1"], ts_ms, "client1"), daemon=True).start()
+    # llamada directa con cabecera
+    put_key("client1", state["client1"], ts_ms, "client1")
+
 
 # ---- Hilo de sincronización ----
 class SyncLoop(threading.Thread):

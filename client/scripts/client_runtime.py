@@ -36,7 +36,7 @@ state = {
     "client2": False,
     "ts": {"toggle": 0, "client1": 0, "client2": 0}
 }
-lock = threading.Lock()
+lock = threading.RLock()
 
 # ---- GPIO ----
 def gpio_setup():
@@ -164,8 +164,8 @@ def on_press_toggle(ts_ms: int):
     with lock:
         state["toggle"] = not state["toggle"]
         state["ts"]["toggle"] = ts_ms
-        leds_apply()
         state_save()
+    leds_apply()
     # llamada directa (sin hilo) para ver el log [HTTP]
     put_key("toggle", state["toggle"], ts_ms, None)
 
@@ -174,8 +174,8 @@ def on_press_client1(ts_ms: int):
     with lock:
         state["client1"] = not state["client1"]
         state["ts"]["client1"] = ts_ms
-        leds_apply()
         state_save()
+    leds_apply()
     # llamada directa con cabecera
     put_key("client1", state["client1"], ts_ms, "client1")
 

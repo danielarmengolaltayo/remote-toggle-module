@@ -145,11 +145,15 @@ class _BtnWatcher(threading.Thread):
                 if (now_ms - self._last_change_ms) >= DEBOUNCE_MS:
                     self._last_stable = level
                     self._last_change_ms = now_ms
-                    if level == GPIO.LOW:   # pulsado
+                    if level == GPIO.LOW:
+                        print(f"[{self.name}] PRESS pin={self.pin}", flush=True)
                         try:
                             self.on_press(now_ms)
                         except Exception as e:
                             print(f"[{self.name}] error callback:", e, flush=True)
+            # << añade esta línea para ver vida:
+            if now_ms % 500 < 10:
+                print(f"[{self.name}] pin={self.pin} level={level} stable={self._last_stable}", flush=True)
             time.sleep(POLL_BTN_MS / 1000.0)
 
 # callbacks de botones

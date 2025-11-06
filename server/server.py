@@ -69,6 +69,21 @@ def save_state():
         tmp.write_text(json.dumps(_state, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(STATE_FILE)
 
+# --- Helpers de autorización mínima ---
+def get_client_id():
+    # Normaliza: 'Client1' -> 'client1'; None -> ''
+    return (request.headers.get("X-Client") or "").strip().lower()
+
+def can_write(key: str, client_id: str) -> bool:
+    # Reglas de este sprint:
+    # - toggle: cualquiera (sin X-Client)
+    # - client1: solo X-Client: client1
+    # - client2: solo X-Client: client2
+    if key == "toggle":
+        return True
+    if key in ("client1", "client2"):
+        return client_id == key
+    return False
 
 app = Flask(
     __name__,
@@ -135,19 +150,3 @@ if __name__ == "__main__":
     # Solo para desarrollo local manual (en producción lo lanzas con systemd/gunicorn)
     app.run(host="0.0.0.0", port=5000, debug=False)
 
-
-# --- Helpers de autorización mínima ---
-def get_client_id():
-    # Normaliza: 'Client1' -> 'client1'; None -> ''
-    return (request.headers.get("X-Client") or "").strip().lower()
-
-def can_write(key: str, client_id: str) -> bool:
-    # Reglas de este sprint:
-    # - toggle: cualquiera (sin X-Client)
-    # - client1: solo X-Client: client1
-    # - client2: solo X-Client: client2
-    if key == "toggle":
-        return True
-    if key in ("client1", "client2"):
-        return client_id == key
-    return False

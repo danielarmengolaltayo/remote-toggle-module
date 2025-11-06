@@ -7,8 +7,14 @@ import RPi.GPIO as GPIO
 import requests
 
 # ------------ Config (BOARD numbering) ------------
-BOARD_LED   = 33      # LED variable (toggle)
-BOARD_BTN   = 37      # Botón (a GND, pull-up interno)
+# LEDs
+BOARD_LED_TOGGLE  = 33
+BOARD_LED_CLIENT1 = 31
+BOARD_LED_CLIENT2 = 32
+
+# Botones (a GND, con pull-up interno)
+BOARD_BTN_TOGGLE  = 37   # ya instalado y comprobado
+BOARD_BTN_CLIENT1 = 22   # NUEVO botón para modificar la clave 'client1'
 
 STATE_FILE  = Path("/home/pi/Desktop/remote-toggle-module/client/state.json")
 SERVER_TXT  = Path("/home/pi/Desktop/config-local/server.txt")
@@ -23,7 +29,7 @@ PULL_INTERVAL  = 0.2   # segundos
 HTTP_TIMEOUT   = 1.0   # segundos
 # --------------------------------------------------
 
-# Estado local (mantiene espejo y timestamps)
+# Estado local (espejo con timestamps)
 state = {
     "toggle": False,
     "client1": False,
@@ -32,17 +38,25 @@ state = {
 }
 lock = threading.Lock()
 
-# ---- Utilidades GPIO ----
+# ---- GPIO ----
 def gpio_setup():
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(BOARD_LED, GPIO.OUT, initial=GPIO.LOW)
-    GPIO.setup(BOARD_BTN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    # LEDs
+    GPIO.setup(BOARD_LED_TOGGLE,  GPIO.OUT, initial=GPIO.LOW)
+    GPIO.setup(BOARD_LED_CLIENT1, GPIO.OUT, initial=GPIO.LOW)
+    GPIO.setup(BOARD_LED_CLIENT2, GPIO.OUT, initial=GPIO.LOW)
+    # Botones (pull-up => reposo 1, pulsado 0)
+    GPIO.setup(BOARD_BTN_TOGGLE,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(BOARD_BTN_CLIENT1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-def led_set(on: bool):
-    GPIO.output(BOARD_LED, GPIO.HIGH if on else GPIO.LOW)
+def leds_apply():
+    with lock:
+        GPIO.output(BOARD_LED_TOGGLE,  GPIO.HIGH if state["toggle"]  else GPIO.LOW)
+        GPIO.output(BOARD_LED_CLIENT1, GPIO.HIGH if state["client1"] else GPIO.LOW)
+        GPIO.output(BOARD_LED_CLIENT2, GPIO.HIGH if state["client2"] else GPIO.LOW)
 
-# ---- Persistencia local opcional ----
+# ---- Persistencia local (opcional) ----
 def state_dir_prepare():
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -59,7 +73,7 @@ def state_load():
                         state["ts"][k] = int(ts_in.get(k, state["ts"][k]))
     except Exception as e:
         print("[WARN] state_load:", e, flush=True)
-    led_set(state["toggle"])
+    leds_apply()
 
 def state_save():
     tmp = STATE_FILE.with_suffix(".tmp")
@@ -95,56 +109,72 @@ def get_state():
         pass
     return None
 
-def put_toggle(value: bool, ts_ms: int):
-    """Empuja toggle (no requiere X-Client según la auth mínima actual)."""
+def put_key(key: str, value: bool, ts_ms: int, xclient: str | None = None):
     base = read_server_base()
     if not base: return False
+    headers = {"Content-Type": "application/json"}
+    if xclient:
+        headers["X-Client"] = xclient
     try:
         r = requests.put(
-            f"{base}/api/state/toggle",
+            f"{base}/api/state/{key}",
             json={"value": bool(value), "ts": int(ts_ms)},
+            headers=headers,
             timeout=HTTP_TIMEOUT
         )
         return r.ok
     except Exception:
         return False
 
-# ---- Hilos ----
-class ButtonWatcher(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
+# ---- Hilos de botones ----
+class _BtnWatcher(threading.Thread):
+    def __init__(self, pin, on_press_callback, name="BTN"):
+        super().__init__(daemon=True, name=name)
+        self.pin = pin
+        self.on_press = on_press_callback
         self._last_change_ms = self._now_ms()
-        self._last_stable = GPIO.input(BOARD_BTN)  # 1=libre, 0=pulsado
+        self._last_stable = GPIO.input(self.pin)  # 1=libre, 0=pulsado
 
-    def _now_ms(self):
-        return int(time.time() * 1000)
+    def _now_ms(self): return int(time.time() * 1000)
 
     def run(self):
         while True:
-            level = GPIO.input(BOARD_BTN)
+            level = GPIO.input(self.pin)
             now_ms = self._now_ms()
-
             if level != self._last_stable:
                 if (now_ms - self._last_change_ms) >= DEBOUNCE_MS:
                     self._last_stable = level
                     self._last_change_ms = now_ms
-                    if level == GPIO.LOW:  # pulsado
-                        with lock:
-                            state["toggle"] = not state["toggle"]
-                            state["ts"]["toggle"] = now_ms
-                            led_set(state["toggle"])
-                            state_save()
-                        # Empuje best-effort (no bloqueante)
-                        threading.Thread(
-                            target=put_toggle,
-                            args=(state["toggle"], now_ms),
-                            daemon=True
-                        ).start()
+                    if level == GPIO.LOW:   # pulsado
+                        try:
+                            self.on_press(now_ms)
+                        except Exception as e:
+                            print(f"[{self.name}] error callback:", e, flush=True)
             time.sleep(POLL_BTN_MS / 1000.0)
 
+# callbacks de botones
+def on_press_toggle(ts_ms: int):
+    with lock:
+        state["toggle"] = not state["toggle"]
+        state["ts"]["toggle"] = ts_ms
+        leds_apply()
+        state_save()
+    # empuje best-effort (toggle es libre)
+    threading.Thread(target=put_key, args=("toggle", state["toggle"], ts_ms, None), daemon=True).start()
+
+def on_press_client1(ts_ms: int):
+    with lock:
+        state["client1"] = not state["client1"]
+        state["ts"]["client1"] = ts_ms
+        leds_apply()
+        state_save()
+    # empuje con auth mínima (X-Client: client1)
+    threading.Thread(target=put_key, args=("client1", state["client1"], ts_ms, "client1"), daemon=True).start()
+
+# ---- Hilo de sincronización ----
 class SyncLoop(threading.Thread):
     def run(self):
-        # Espera opcional: coherente con otros servicios
+        # Espera opcional a boot-ready para coherencia con otros servicios
         for _ in range(200):
             if BOOT_READY_FLAG.exists():
                 break
@@ -160,7 +190,7 @@ class SyncLoop(threading.Thread):
                         if s_ts >= state["ts"].get(k, 0):
                             state[k] = bool(s.get(k, False))
                             state["ts"][k] = s_ts
-                    led_set(state["toggle"])
+                    leds_apply()
                     state_save()
             time.sleep(PULL_INTERVAL)
 
@@ -170,7 +200,8 @@ def main():
     state_dir_prepare()
     state_load()
     try:
-        ButtonWatcher().start()
+        _BtnWatcher(BOARD_BTN_TOGGLE,  on_press_toggle,  name="BTN_TOGGLE").start()
+        _BtnWatcher(BOARD_BTN_CLIENT1, on_press_client1, name="BTN_CLIENT1").start()
         SyncLoop().start()
         while True:
             time.sleep(1)

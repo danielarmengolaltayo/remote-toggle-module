@@ -205,6 +205,8 @@ class SyncLoop(threading.Thread):
 
 # ---- Main / señales ----
 def main():
+    import __main__, os
+    print(f"[BOOT] running={__main__.__file__} cwd={os.getcwd()}", flush=True)
     gpio_setup()
     state_dir_prepare()
     state_load()

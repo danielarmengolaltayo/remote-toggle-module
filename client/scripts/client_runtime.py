@@ -122,6 +122,7 @@ def put_key(key: str, value: bool, ts_ms: int, xclient: str | None = None):
             headers=headers,
             timeout=HTTP_TIMEOUT
         )
+        print(f"[HTTP] PUT {key} -> {r.status_code} {r.text[:120]}", flush=True)
         return r.ok
     except Exception:
         return False

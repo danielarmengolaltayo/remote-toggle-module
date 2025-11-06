@@ -179,6 +179,40 @@ def on_press_client1(ts_ms: int):
     # llamada directa con cabecera
     put_key("client1", state["client1"], ts_ms, "client1")
 
+def merge_from_server_snapshot(snap: dict):
+    """Merge LWW por clave y aplica LEDs + guarda."""
+    if not snap: 
+        return False
+    changed = False
+    with lock:
+        for k in ("toggle","client1","client2"):
+            s_ts = int(snap.get("ts", {}).get(k, 0))
+            if s_ts >= state["ts"].get(k, 0):
+                nv = bool(snap.get(k, False))
+                if nv != state[k]:
+                    changed = True
+                state[k] = nv
+                state["ts"][k] = s_ts
+        state_save()
+    if changed:
+        leds_apply()
+    else:
+        # aun así garantizamos LEDs coherentes
+        leds_apply()
+    return True
+
+def initial_sync(timeout_sec=5.0):
+    """Intenta leer /api/state hasta timeout para arrancar ya alineados con el servidor."""
+    t0 = time.time()
+    while time.time() - t0 < timeout_sec:
+        s = get_state()
+        if s and merge_from_server_snapshot(s):
+            print("[SYNC] initial server snapshot applied", flush=True)
+            return True
+        time.sleep(0.3)
+    print("[SYNC] initial snapshot not available (will sync in background)", flush=True)
+    return False
+
 
 # ---- Hilo de sincronización ----
 class SyncLoop(threading.Thread):
@@ -192,24 +226,15 @@ class SyncLoop(threading.Thread):
         while True:
             s = get_state()
             if s:
-                # Merge LWW por clave con timestamps
-                with lock:
-                    for k in ("toggle", "client1", "client2"):
-                        s_ts = int(s.get("ts", {}).get(k, 0))
-                        if s_ts >= state["ts"].get(k, 0):
-                            state[k] = bool(s.get(k, False))
-                            state["ts"][k] = s_ts
-                    leds_apply()
-                    state_save()
+                merge_from_server_snapshot(s)
             time.sleep(PULL_INTERVAL)
 
 # ---- Main / señales ----
 def main():
-    import __main__, os
-    print(f"[BOOT] running={__main__.__file__} cwd={os.getcwd()}", flush=True)
     gpio_setup()
     state_dir_prepare()
     state_load()
+    initial_sync(timeout_sec=5.0)
     try:
         _BtnWatcher(BOARD_BTN_TOGGLE,  on_press_toggle,  name="BTN_TOGGLE").start()
         _BtnWatcher(BOARD_BTN_CLIENT1, on_press_client1, name="BTN_CLIENT1").start()

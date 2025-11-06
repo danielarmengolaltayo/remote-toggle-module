@@ -112,22 +112,19 @@ def get_state():
 def put_key(key: str, value: bool, ts_ms: int, xclient=None):
     base = read_server_base()
     if not base:
-        print(f"[HTTP] base URL vacía", flush=True)
-        return False
+        print(f"[HTTP] base URL vacía", flush=True); return False
     headers = {"Content-Type": "application/json"}
-    if xclient:
-        headers["X-Client"] = xclient
+    if xclient: headers["X-Client"] = xclient
+    verify = False if base.startswith("https://") else True  # DEBUG: desactiva CA en HTTPS
+    print(f"[HTTP] TRY {base}/api/state/{key} val={value} ts={ts_ms}", flush=True)
     try:
-        r = requests.put(
-            f"{base}/api/state/{key}",
-            json={"value": bool(value), "ts": int(ts_ms)},
-            headers=headers,
-            timeout=HTTP_TIMEOUT
-        )
-        print(f"[HTTP] PUT {key}={value} ts={ts_ms} -> {r.status_code} {r.text[:120]}", flush=True)
+        r = requests.put(f"{base}/api/state/{key}",
+                         json={"value": bool(value), "ts": int(ts_ms)},
+                         headers=headers, timeout=1.0, verify=verify)
+        print(f"[HTTP] PUT {key} -> {r.status_code} {r.text[:120]}", flush=True)
         return r.ok
     except Exception as e:
-        print(f"[HTTP] EXC {key}: {e}", flush=True)
+        print(f"[HTTP] EXC {key}: {type(e).__name__}: {e}", flush=True)
         return False
 
 

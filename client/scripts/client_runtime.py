@@ -8,7 +8,7 @@ import requests
 
 # ------------ Config (BOARD numbering) ------------
 BOARD_LED   = 33      # LED variable (toggle)
-BOARD_BTN   = 31      # Botón (a GND, pull-up interno)
+BOARD_BTN   = 37      # Botón (a GND, pull-up interno)
 
 STATE_FILE  = Path("/home/pi/Desktop/remote-toggle-module/client/state.json")
 SERVER_TXT  = Path("/home/pi/Desktop/config-local/server.txt")

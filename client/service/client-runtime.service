@@ -1,5 +1,5 @@
 [Unit]
-Description=Cliente: runtime WS (botón + LED variable)
+Description=Cliente: runtime (botón + LED variable, REST polling)
 After=network-online.target boot-led.service internet-led.service
 Wants=network-online.target
 ConditionPathExists=/run/boot-ready

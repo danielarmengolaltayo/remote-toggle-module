@@ -109,14 +109,17 @@ def api_put_key(key):
     if "value" not in body:
         return jsonify({"error": "missing 'value'"}), 400
 
-    # Reglas de autorización (pendiente de activar en paso posterior):
-    # - toggle: c1 y c2
-    # - client1: solo c1
-    # - client2: solo c2
-    # client_id = get_client_id()
+    # === AUTORIZACIÓN MÍNIMA ===
+    client_id = get_client_id()
+    if not can_write(key, client_id):
+        return jsonify({"error": "forbidden for this key"}), 403
 
+    # === Validación y escritura ===
     val = bool(body["value"])
-    ts = int(body.get("ts", _now_ts()))
+    try:
+        ts = int(body.get("ts", _now_ts()))
+    except Exception:
+        ts = _now_ts()
 
     with _state_lock:
         _state[key] = val
@@ -131,3 +134,20 @@ def api_put_key(key):
 if __name__ == "__main__":
     # Solo para desarrollo local manual (en producción lo lanzas con systemd/gunicorn)
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+
+# --- Helpers de autorización mínima ---
+def get_client_id():
+    # Normaliza: 'Client1' -> 'client1'; None -> ''
+    return (request.headers.get("X-Client") or "").strip().lower()
+
+def can_write(key: str, client_id: str) -> bool:
+    # Reglas de este sprint:
+    # - toggle: cualquiera (sin X-Client)
+    # - client1: solo X-Client: client1
+    # - client2: solo X-Client: client2
+    if key == "toggle":
+        return True
+    if key in ("client1", "client2"):
+        return client_id == key
+    return False

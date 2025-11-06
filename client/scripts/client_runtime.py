@@ -109,9 +109,11 @@ def get_state():
         pass
     return None
 
-def put_key(key: str, value: bool, ts_ms: int, xclient: str | None = None):
+def put_key(key: str, value: bool, ts_ms: int, xclient=None):
     base = read_server_base()
-    if not base: return False
+    if not base:
+        print(f"[HTTP] base URL vacía", flush=True)
+        return False
     headers = {"Content-Type": "application/json"}
     if xclient:
         headers["X-Client"] = xclient
@@ -122,10 +124,12 @@ def put_key(key: str, value: bool, ts_ms: int, xclient: str | None = None):
             headers=headers,
             timeout=HTTP_TIMEOUT
         )
-        print(f"[HTTP] PUT {key} -> {r.status_code} {r.text[:120]}", flush=True)
+        print(f"[HTTP] PUT {key}={value} ts={ts_ms} -> {r.status_code} {r.text[:120]}", flush=True)
         return r.ok
-    except Exception:
+    except Exception as e:
+        print(f"[HTTP] EXC {key}: {e}", flush=True)
         return False
+
 
 # ---- Hilos de botones ----
 class _BtnWatcher(threading.Thread):

@@ -12,6 +12,7 @@ BOARD_LED_TOGGLE  = 33
 BOARD_LED_CLIENT1 = 31
 BOARD_LED_CLIENT2 = 32
 BOARD_LED_SERVERONLINE = 29
+BOARD_LED_INTERNET = 16
 
 # Botones (a GND, con pull-up interno)
 BOARD_BTN_TOGGLE  = 37
@@ -52,6 +53,7 @@ def gpio_setup():
     GPIO.setup(BOARD_LED_CLIENT1, GPIO.OUT, initial=GPIO.LOW)
     GPIO.setup(BOARD_LED_CLIENT2, GPIO.OUT, initial=GPIO.LOW)
     GPIO.setup(BOARD_LED_SERVERONLINE, GPIO.OUT, initial=GPIO.LOW)
+    GPIO.setup(BOARD_LED_INTERNET, GPIO.OUT, initial=GPIO.LOW)
     # Botones (pull-up => reposo 1, pulsado 0)
     GPIO.setup(BOARD_BTN_TOGGLE,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(BOARD_BTN_CLIENT1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -288,6 +290,40 @@ class ServerOnlineLedLoop(threading.Thread):
             GPIO.output(BOARD_LED_SERVERONLINE, GPIO.HIGH if is_ok else GPIO.LOW)
             time.sleep(self.period)
 
+import socket
+
+class InternetLedLoop(threading.Thread):
+    """
+    Enciende BOARD_LED_INTERNET si hay Internet. Estrategia ligera:
+    - Cada 'period' intenta socket a 1.1.1.1:53 (DNS) con timeout corto.
+    - Si tiene éxito, considera 'online' durante 'alive_window_sec' (histeresis).
+    """
+    def __init__(self, period=2.0, alive_window_sec=5.0, timeout=1.5):
+        super().__init__(daemon=True, name="LED_INTERNET")
+        self.period = float(period)
+        self.alive_window_sec = float(alive_window_sec)
+        self.timeout = float(timeout)
+        self._last_ok_monotonic = 0.0
+
+    def _probe(self) -> bool:
+        try:
+            with socket.create_connection(("1.1.1.1", 53), self.timeout):
+                return True
+        except Exception:
+            return False
+
+    def run(self):
+        while True:
+            # Probar conexión
+            if self._probe():
+                self._last_ok_monotonic = time.monotonic()
+
+            # Decidir LED con ventana de vida para evitar parpadeos
+            is_ok = (time.monotonic() - self._last_ok_monotonic) <= self.alive_window_sec
+            GPIO.output(BOARD_LED_INTERNET, GPIO.HIGH if is_ok else GPIO.LOW)
+
+            time.sleep(self.period)
+
 
 # ---- Main / señales ----
 def main():
@@ -300,6 +336,7 @@ def main():
         _BtnWatcher(BOARD_BTN_CLIENT1, on_press_client1, name="BTN_CLIENT1").start()
         _BtnWatcher(BOARD_BTN_CLIENT2, on_press_client2, name="BTN_CLIENT2").start()
         ServerOnlineLedLoop(on_timeout_sec=5.0, period=0.5).start()
+        InternetLedLoop(period=2.0, alive_window_sec=5.0, timeout=1.5).start()
         SyncLoop().start()
         while True:
             time.sleep(1)

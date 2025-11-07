@@ -69,21 +69,6 @@ def save_state():
         tmp.write_text(json.dumps(_state, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(STATE_FILE)
 
-# --- Helpers de autorización mínima ---
-def get_client_id():
-    # Normaliza: 'Client1' -> 'client1'; None -> ''
-    return (request.headers.get("X-Client") or "").strip().lower()
-
-def can_write(key: str, client_id: str) -> bool:
-    # Reglas de este sprint:
-    # - toggle: cualquiera (sin X-Client)
-    # - client1: solo X-Client: client1
-    # - client2: solo X-Client: client2
-    if key == "toggle":
-        return True
-    if key in ("client1", "client2"):
-        return client_id == key
-    return False
 
 app = Flask(
     __name__,
@@ -93,12 +78,6 @@ app = Flask(
 
 # Carga estado al arrancar módulo (Flask 3 ya no tiene before_first_request)
 load_state()
-
-
-# --- Helpers de autorización mínima (placeholder para futuro) ---
-def get_client_id():
-    # Para un paso posterior: cabeceras X-Client / X-Token
-    return request.headers.get("X-Client")
 
 
 # --- Rutas HTML ---
@@ -124,12 +103,6 @@ def api_put_key(key):
     if "value" not in body:
         return jsonify({"error": "missing 'value'"}), 400
 
-    # === AUTORIZACIÓN MÍNIMA ===
-    client_id = get_client_id()
-    if not can_write(key, client_id):
-        return jsonify({"error": "forbidden for this key"}), 403
-
-    # === Validación y escritura ===
     val = bool(body["value"])
     try:
         ts = int(body.get("ts", _now_ts()))

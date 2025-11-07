@@ -13,8 +13,9 @@ BOARD_LED_CLIENT1 = 31
 BOARD_LED_CLIENT2 = 32
 
 # Botones (a GND, con pull-up interno)
-BOARD_BTN_TOGGLE  = 37   # ya instalado y comprobado
-BOARD_BTN_CLIENT1 = 22   # NUEVO botón para modificar la clave 'client1'
+BOARD_BTN_TOGGLE  = 37
+BOARD_BTN_CLIENT1 = 22
+BOARD_BTN_CLIENT2 = 36
 
 STATE_FILE  = Path("/home/pi/Desktop/remote-toggle-module/client/state.json")
 SERVER_TXT  = Path("/home/pi/Desktop/config-local/server.txt")
@@ -49,6 +50,7 @@ def gpio_setup():
     # Botones (pull-up => reposo 1, pulsado 0)
     GPIO.setup(BOARD_BTN_TOGGLE,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(BOARD_BTN_CLIENT1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(BOARD_BTN_CLIENT2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 def leds_apply():
     with lock:
@@ -109,26 +111,25 @@ def get_state():
         pass
     return None
 
-def put_key(key: str, value: bool, ts_ms: int, xclient=None):
+def put_key(key: str, value: bool, ts_ms: int):
     base = read_server_base()
     if not base:
-        print(f"[HTTP] base URL vacía", flush=True); return False
-    headers = {"Content-Type": "application/json"}
-    if xclient: headers["X-Client"] = xclient
-    verify = False if base.startswith("https://") else True  # DEBUG: desactiva CA en HTTPS
-    print(f"[HTTP] TRY {base}/api/state/{key} val={value} ts={ts_ms}", flush=True)
+        print(f"[HTTP] base URL vacía", flush=True)
+        return False
     try:
-        r = requests.put(f"{base}/api/state/{key}",
-                         json={"value": bool(value), "ts": int(ts_ms)},
-                         headers=headers, timeout=1.0, verify=verify)
-        print(f"[HTTP] PUT {key} -> {r.status_code} {r.text[:120]}", flush=True)
+        r = requests.put(
+            f"{base}/api/state/{key}",
+            json={"value": bool(value), "ts": int(ts_ms)},
+            timeout=HTTP_TIMEOUT
+        )
+        print(f"[HTTP] PUT {key}={value} ts={ts_ms} -> {r.status_code} {r.text[:120]}", flush=True)
         return r.ok
     except Exception as e:
-        print(f"[HTTP] EXC {key}: {type(e).__name__}: {e}", flush=True)
+        print(f"[HTTP] EXC {key}: {e}", flush=True)
         return False
 
 # --- Reconciliación local → servidor tras recuperar conexión ---
-_last_pushed = {"toggle": 0, "client1": 0}
+_last_pushed = {"toggle": 0, "client1": 0, "client2": 0}
 
 def reconcile_with_server(snap: dict):
     """
@@ -139,17 +140,17 @@ def reconcile_with_server(snap: dict):
         return
     to_push = []
     with lock:
-        for key in ("toggle", "client1"):  # este cliente NO empuja client2
+        for key in ("toggle", "client1", "client2"):
             s_ts = int(snap.get("ts", {}).get(key, 0))
             l_ts = int(state["ts"].get(key, 0))
             if l_ts > s_ts and l_ts != _last_pushed.get(key, 0):
                 to_push.append((key, state[key], l_ts))
 
     for key, val, ts_ms in to_push:
-        xclient = "client1" if key == "client1" else None
-        ok = put_key(key, val, ts_ms, xclient)
+        ok = put_key(key, val, ts_ms)
         if ok:
             _last_pushed[key] = ts_ms
+
 
 # ---- Hilos de botones ----
 class _BtnWatcher(threading.Thread):
@@ -190,7 +191,7 @@ def on_press_toggle(ts_ms: int):
         state_save()
     leds_apply()
     # llamada directa (sin hilo) para ver el log [HTTP]
-    put_key("toggle", state["toggle"], ts_ms, None)
+    put_key("toggle", state["toggle"], ts_ms)
 
 def on_press_client1(ts_ms: int):
     print(f"[CALL] client1 -> value will be {not state['client1']} ts={ts_ms}", flush=True)
@@ -200,7 +201,16 @@ def on_press_client1(ts_ms: int):
         state_save()
     leds_apply()
     # llamada directa con cabecera
-    put_key("client1", state["client1"], ts_ms, "client1")
+    put_key("client1", state["client1"], ts_ms)
+
+def on_press_client2(ts_ms: int):
+    print(f"[CALL] client2 -> value will be {not state['client2']} ts={ts_ms}", flush=True)
+    with lock:
+        state["client2"] = not state["client2"]
+        state["ts"]["client2"] = ts_ms
+        state_save()
+    leds_apply()
+    put_key("client2", state["client2"], ts_ms)
 
 def merge_from_server_snapshot(snap: dict):
     if not snap: 
@@ -260,6 +270,7 @@ def main():
     try:
         _BtnWatcher(BOARD_BTN_TOGGLE,  on_press_toggle,  name="BTN_TOGGLE").start()
         _BtnWatcher(BOARD_BTN_CLIENT1, on_press_client1, name="BTN_CLIENT1").start()
+        _BtnWatcher(BOARD_BTN_CLIENT2, on_press_client2, name="BTN_CLIENT2").start()
         SyncLoop().start()
         while True:
             time.sleep(1)

@@ -1,8 +1,9 @@
 [Unit]
-Description=Cliente: runtime (botón + LED variable, REST polling)
-After=network-online.target boot-led.service internet-led.service
+Description=Cliente: runtime WS/REST (botones + LEDs + sync)
+After=network-online.target boot-led.service
 Wants=network-online.target
 ConditionPathExists=/run/boot-ready
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -12,7 +13,7 @@ Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/home/pi/Desktop/remote-toggle-module/client
 ExecStart=/home/pi/Desktop/remote-toggle-module/client/.venv/bin/python /home/pi/Desktop/remote-toggle-module/client/scripts/client_runtime.py
 Restart=always
-RestartSec=2
+RestartSec=1
 
 [Install]
 WantedBy=multi-user.target

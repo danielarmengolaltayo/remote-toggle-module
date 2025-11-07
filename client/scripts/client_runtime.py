@@ -11,6 +11,7 @@ import requests
 BOARD_LED_TOGGLE  = 33
 BOARD_LED_CLIENT1 = 31
 BOARD_LED_CLIENT2 = 32
+BOARD_LED_SERVERONLINE = 29
 
 # Botones (a GND, con pull-up interno)
 BOARD_BTN_TOGGLE  = 37
@@ -39,6 +40,9 @@ state = {
 }
 lock = threading.RLock()
 
+_server_online_lock = threading.Lock()
+_last_server_ok_monotonic = 0.0  # instante (time.monotonic) del último GET exitoso
+
 # ---- GPIO ----
 def gpio_setup():
     GPIO.setwarnings(False)
@@ -47,6 +51,7 @@ def gpio_setup():
     GPIO.setup(BOARD_LED_TOGGLE,  GPIO.OUT, initial=GPIO.LOW)
     GPIO.setup(BOARD_LED_CLIENT1, GPIO.OUT, initial=GPIO.LOW)
     GPIO.setup(BOARD_LED_CLIENT2, GPIO.OUT, initial=GPIO.LOW)
+    GPIO.setup(BOARD_LED_SERVERONLINE, GPIO.OUT, initial=GPIO.LOW)
     # Botones (pull-up => reposo 1, pulsado 0)
     GPIO.setup(BOARD_BTN_TOGGLE,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(BOARD_BTN_CLIENT1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -236,11 +241,15 @@ def initial_sync(timeout_sec=5.0):
         snap = get_state()
         if snap and merge_from_server_snapshot(snap):
             print("[SYNC] initial server snapshot applied", flush=True)
+            global _last_server_ok_monotonic
+            with _server_online_lock:
+                _last_server_ok_monotonic = time.monotonic()
             reconcile_with_server(snap)
             return True
         time.sleep(0.3)
     print("[SYNC] initial snapshot not available (will sync in background)", flush=True)
     return False
+
 
 # ---- Hilo de sincronización ----
 class SyncLoop(threading.Thread):
@@ -251,14 +260,33 @@ class SyncLoop(threading.Thread):
                 break
             time.sleep(0.1)
 
+        global _last_server_ok_monotonic
+
         while True:
             snap = get_state()
             if snap:
                 # 1) aplica servidor → local (LWW)
                 merge_from_server_snapshot(snap)
+                with _server_online_lock:
+                    _last_server_ok_monotonic = time.monotonic()
                 # 2) empuja local → servidor si local era más nuevo (offline edits)
                 reconcile_with_server(snap)
             time.sleep(PULL_INTERVAL)
+
+class ServerOnlineLedLoop(threading.Thread):
+    def __init__(self, on_timeout_sec=5.0, period=0.5):
+        super().__init__(daemon=True, name="LED_SERVER_ONLINE")
+        self.on_timeout_sec = float(on_timeout_sec)  # cuánto dura “OK” tras el último GET exitoso
+        self.period = float(period)
+
+    def run(self):
+        while True:
+            now = time.monotonic()
+            with _server_online_lock:
+                last_ok = _last_server_ok_monotonic
+            is_ok = (now - last_ok) <= self.on_timeout_sec
+            GPIO.output(BOARD_LED_SERVERONLINE, GPIO.HIGH if is_ok else GPIO.LOW)
+            time.sleep(self.period)
 
 
 # ---- Main / señales ----
@@ -271,6 +299,7 @@ def main():
         _BtnWatcher(BOARD_BTN_TOGGLE,  on_press_toggle,  name="BTN_TOGGLE").start()
         _BtnWatcher(BOARD_BTN_CLIENT1, on_press_client1, name="BTN_CLIENT1").start()
         _BtnWatcher(BOARD_BTN_CLIENT2, on_press_client2, name="BTN_CLIENT2").start()
+        ServerOnlineLedLoop(on_timeout_sec=5.0, period=0.5).start()
         SyncLoop().start()
         while True:
             time.sleep(1)

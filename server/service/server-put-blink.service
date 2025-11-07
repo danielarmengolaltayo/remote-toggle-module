@@ -1,12 +1,14 @@
 [Unit]
 Description=Blink LED (BOARD 38) on server state change
-# No depende del servidor; lo dispara el .path cuando cambia state.json
+# Desactiva límite de reinicios para permitir blinks rápidos
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
-User=root
-Group=root
-Environment=PYTHONUNBUFFERED=1
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/Desktop/remote-toggle-module/server/scripts
 ExecStart=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/server/scripts/server_put_blink.py
-# Evita solapes si llegan varios eventos seguidos:
-ExecStartPre=/bin/sleep 0.05
+
+[Install]
+WantedBy=multi-user.target

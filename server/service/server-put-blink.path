@@ -2,9 +2,9 @@
 Description=Trigger server-put-blink.service when state.json changes
 
 [Path]
-# Detecta reemplazos atómicos y escrituras
+# Se dispara cuando cambia el archivo del estado del servidor
 PathChanged=/home/pi/Desktop/remote-toggle-module/server/state.json
-PathModified=/home/pi/Desktop/remote-toggle-module/server/state.json
+
 Unit=server-put-blink.service
 
 [Install]

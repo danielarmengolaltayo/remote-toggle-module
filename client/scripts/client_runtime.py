@@ -127,6 +127,29 @@ def put_key(key: str, value: bool, ts_ms: int, xclient=None):
         print(f"[HTTP] EXC {key}: {type(e).__name__}: {e}", flush=True)
         return False
 
+# --- Reconciliación local → servidor tras recuperar conexión ---
+_last_pushed = {"toggle": 0, "client1": 0}
+
+def reconcile_with_server(snap: dict):
+    """
+    Si local.ts > server.ts empuja estado local (toggle, client1).
+    Evita reintentos duplicados con _last_pushed.
+    """
+    if not snap: 
+        return
+    to_push = []
+    with lock:
+        for key in ("toggle", "client1"):  # este cliente NO empuja client2
+            s_ts = int(snap.get("ts", {}).get(key, 0))
+            l_ts = int(state["ts"].get(key, 0))
+            if l_ts > s_ts and l_ts != _last_pushed.get(key, 0):
+                to_push.append((key, state[key], l_ts))
+
+    for key, val, ts_ms in to_push:
+        xclient = "client1" if key == "client1" else None
+        ok = put_key(key, val, ts_ms, xclient)
+        if ok:
+            _last_pushed[key] = ts_ms
 
 # ---- Hilos de botones ----
 class _BtnWatcher(threading.Thread):
@@ -180,7 +203,6 @@ def on_press_client1(ts_ms: int):
     put_key("client1", state["client1"], ts_ms, "client1")
 
 def merge_from_server_snapshot(snap: dict):
-    """Merge LWW por clave y aplica LEDs + guarda."""
     if not snap: 
         return False
     changed = False
@@ -194,40 +216,40 @@ def merge_from_server_snapshot(snap: dict):
                 state[k] = nv
                 state["ts"][k] = s_ts
         state_save()
-    if changed:
-        leds_apply()
-    else:
-        # aun así garantizamos LEDs coherentes
-        leds_apply()
+    leds_apply()
     return True
 
 def initial_sync(timeout_sec=5.0):
-    """Intenta leer /api/state hasta timeout para arrancar ya alineados con el servidor."""
     t0 = time.time()
+    snap = None
     while time.time() - t0 < timeout_sec:
-        s = get_state()
-        if s and merge_from_server_snapshot(s):
+        snap = get_state()
+        if snap and merge_from_server_snapshot(snap):
             print("[SYNC] initial server snapshot applied", flush=True)
+            reconcile_with_server(snap)
             return True
         time.sleep(0.3)
     print("[SYNC] initial snapshot not available (will sync in background)", flush=True)
     return False
 
-
 # ---- Hilo de sincronización ----
 class SyncLoop(threading.Thread):
     def run(self):
-        # Espera opcional a boot-ready para coherencia con otros servicios
+        # Espera opcional al boot-ready
         for _ in range(200):
             if BOOT_READY_FLAG.exists():
                 break
             time.sleep(0.1)
 
         while True:
-            s = get_state()
-            if s:
-                merge_from_server_snapshot(s)
+            snap = get_state()
+            if snap:
+                # 1) aplica servidor → local (LWW)
+                merge_from_server_snapshot(snap)
+                # 2) empuja local → servidor si local era más nuevo (offline edits)
+                reconcile_with_server(snap)
             time.sleep(PULL_INTERVAL)
+
 
 # ---- Main / señales ----
 def main():

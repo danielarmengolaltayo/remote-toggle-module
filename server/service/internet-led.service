@@ -1,5 +1,5 @@
 [Unit]
-Description=Internet connectivity LED (client)
+Description=Internet connectivity LED (server)
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/run/boot-ready
@@ -8,7 +8,7 @@ ConditionPathExists=/run/boot-ready
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/both/scripts/internet_led.py
+ExecStart=/usr/bin/python3 /home/pi/Desktop/remote-toggle-module/server/scripts/internet_led.py
 Restart=on-failure
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1

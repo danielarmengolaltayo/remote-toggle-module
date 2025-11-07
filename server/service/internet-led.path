@@ -1,5 +1,5 @@
 [Unit]
-Description=Start internet-led when /run/boot-ready exists (client)
+Description=Start internet-led when /run/boot-ready exists (server)
 
 [Path]
 PathExists=/run/boot-ready
